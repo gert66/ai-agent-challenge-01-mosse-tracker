@@ -1,0 +1,43 @@
+{
+  "videos": [
+    {
+      "id": "synthetic_easy",
+      "title": "Synthetic — easy",
+      "file": "videos/synthetic_easy.mp4",
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "frameCount": 180,
+      "durationSeconds": 6,
+      "description": "Synthetic clip with a single object moving smoothly against a simple background; no occlusion or camera motion.",
+      "codec": "h264",
+      "pixFmt": "yuv420p"
+    },
+    {
+      "id": "synthetic_occlusion",
+      "title": "Synthetic — occlusion",
+      "file": "videos/synthetic_occlusion.mp4",
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "frameCount": 180,
+      "durationSeconds": 6,
+      "description": "Synthetic clip with camera motion and partial/full occlusion of the tracked object, exercising loss and recovery.",
+      "codec": "h264",
+      "pixFmt": "yuv420p"
+    },
+    {
+      "id": "vtest",
+      "title": "vtest (OpenCV sample)",
+      "file": "videos/vtest.mp4",
+      "width": 768,
+      "height": 576,
+      "fps": 10,
+      "frameCount": 795,
+      "durationSeconds": 79.5,
+      "description": "Public OpenCV pedestrian-tracking sample video (vtest.avi) with multiple real-world moving subjects.",
+      "codec": "h264",
+      "pixFmt": "yuv420p"
+    }
+  ]
+}
