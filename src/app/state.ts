@@ -33,7 +33,7 @@ export type AppPhase =
  */
 export const SUGGESTED_BOXES: Record<string, Rect> = {
   synthetic_easy: { x: 36, y: 126, width: 80, height: 54 },
-  synthetic_occlusion: { x: 36, y: 130, width: 80, height: 54 },
+  synthetic_occlusion: { x: 36, y: 130, width: 80, height: 50 },
   vtest: { x: 250, y: 205, width: 65, height: 130 },
 };
 

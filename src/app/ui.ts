@@ -1,6 +1,7 @@
 import { MosseTracker, toGray, type Rect, type TrackResult, type TrackState } from '../tracker/mosse';
 import { MetricsAggregator, extractTrajectoryEvents } from './metrics';
 import { drawSelectionRect, drawTrackingOverlay } from './overlay';
+import { bumpRunToken, createRunToken, isRunCurrent } from './runToken';
 import { MIN_SELECTION_SIZE, SUGGESTED_BOXES, type AppPhase, type VideoManifestEntry } from './state';
 import { loadManifest, seekTo, videoUrl, waitForLoadedData } from './video';
 
@@ -83,6 +84,19 @@ export async function initApp(root: Document = document): Promise<void> {
   const baseUrl = import.meta.env.BASE_URL;
   const manifest = await loadManifest(baseUrl);
 
+  // Optional `?maxFrames=N` bounds how many frames a run processes, e.g. so
+  // an e2e test can exercise the full flow on vtest.mp4 (795 frames) without
+  // waiting for a full real-time-scale run. Does not affect the UI/manifest.
+  const maxFramesOverride: number | null = (() => {
+    const raw = new URLSearchParams(window.location.search).get('maxFrames');
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  })();
+
+  function effectiveFrameCount(entry: VideoManifestEntry): number {
+    return maxFramesOverride ? Math.min(entry.frameCount, maxFramesOverride) : entry.frameCount;
+  }
+
   let currentEntry: VideoManifestEntry = manifest.videos[0];
   let phase: AppPhase = 'loading';
   let selectionRect: Rect | null = null;
@@ -93,7 +107,19 @@ export async function initApp(root: Document = document): Promise<void> {
   let metrics = new MetricsAggregator();
   let frameIndex = 0; // index of the frame currently drawn on the canvas
   let playing = false;
-  let playToken = 0; // bumped to cancel an in-flight play loop
+  const runToken = createRunToken();
+
+  /**
+   * Invalidates any in-flight run (a pending seek inside the tracking loop,
+   * loadVideo, Reset, or Re-select) and returns the id of the new run that
+   * the caller is about to start. Call this from Reset, Re-select, a video
+   * switch, and Pause — the only actions that tear down `tracker`/selection
+   * state out from under an awaited operation.
+   */
+  function invalidateCurrentRun(): number {
+    playing = false;
+    return bumpRunToken(runToken);
+  }
 
   for (const entry of manifest.videos) {
     const option = document.createElement('option');
@@ -169,15 +195,22 @@ export async function initApp(root: Document = document): Promise<void> {
     }
   }
 
-  async function seekToFrame(idx: number): Promise<void> {
-    const clamped = Math.max(0, Math.min(idx, currentEntry.frameCount - 1));
+  /**
+   * Seeks to frame `idx`. Only updates `frameIndex` if `myRunId` is still
+   * current when the seek resolves — otherwise a newer run (Reset,
+   * Re-select, or a video switch) has already superseded this one, and the
+   * (possibly stale/coalesced) 'seeked' event must not overwrite state.
+   */
+  async function seekToFrame(idx: number, myRunId: number): Promise<void> {
+    const clamped = Math.max(0, Math.min(idx, effectiveFrameCount(currentEntry) - 1));
     const time = (clamped + 0.5) / currentEntry.fps;
     await seekTo(el.video, Math.min(time, el.video.duration || time));
+    if (!isRunCurrent(runToken, myRunId)) return;
     frameIndex = clamped;
   }
 
   async function loadVideo(entry: VideoManifestEntry): Promise<void> {
-    stopPlayback();
+    const myRunId = invalidateCurrentRun();
     phase = 'loading';
     updateControls();
 
@@ -196,7 +229,9 @@ export async function initApp(root: Document = document): Promise<void> {
     el.video.src = videoUrl(baseUrl, entry.file);
     el.video.load();
     await waitForLoadedData(el.video);
-    await seekToFrame(0);
+    if (!isRunCurrent(runToken, myRunId)) return;
+    await seekToFrame(0, myRunId);
+    if (!isRunCurrent(runToken, myRunId)) return;
 
     phase = 'select';
     setHint('Drag a box around the object in the first frame, or click "Use suggested box".');
@@ -268,14 +303,15 @@ export async function initApp(root: Document = document): Promise<void> {
   });
 
   el.btnReselect.addEventListener('click', async () => {
-    stopPlayback();
+    const myRunId = invalidateCurrentRun();
     tracker = null;
     trajectory = [];
     metrics = new MetricsAggregator();
     renderMetrics();
     selectionRect = null;
     dragRect = null;
-    await seekToFrame(0);
+    await seekToFrame(0, myRunId);
+    if (!isRunCurrent(runToken, myRunId)) return;
     phase = 'select';
     setHint('Drag a box around the object in the first frame, or click "Use suggested box".');
     drawSelectionState();
@@ -298,13 +334,14 @@ export async function initApp(root: Document = document): Promise<void> {
     ];
   }
 
-  async function processNextFrame(): Promise<boolean> {
+  async function processNextFrame(myRunId: number): Promise<boolean> {
     if (!selectionRect) return false;
     ensureTrackerInitialized();
     if (!tracker) return false;
-    if (frameIndex >= currentEntry.frameCount - 1) return false;
+    if (frameIndex >= effectiveFrameCount(currentEntry) - 1) return false;
 
-    await seekToFrame(frameIndex + 1);
+    await seekToFrame(frameIndex + 1, myRunId);
+    if (!isRunCurrent(runToken, myRunId) || !tracker) return false;
     drawCurrentFrame();
     const imageData = ctx.getImageData(0, 0, el.canvas.width, el.canvas.height);
     const gray = toGray(imageData.data, el.canvas.width, el.canvas.height);
@@ -331,7 +368,7 @@ export async function initApp(root: Document = document): Promise<void> {
     renderMetrics();
     renderTrackingState(result);
 
-    return frameIndex < currentEntry.frameCount - 1;
+    return frameIndex < effectiveFrameCount(currentEntry) - 1;
   }
 
   function trajectoryLastNonLostRect(): Rect | null {
@@ -342,11 +379,6 @@ export async function initApp(root: Document = document): Promise<void> {
     return selectionRect;
   }
 
-  function stopPlayback(): void {
-    playing = false;
-    playToken++;
-  }
-
   function currentSpeedDelayMs(): number {
     const value = Number(el.speedSelect.value);
     if (!value) return 0; // "max"
@@ -354,10 +386,10 @@ export async function initApp(root: Document = document): Promise<void> {
     return frameIntervalMs / value;
   }
 
-  async function playLoop(token: number): Promise<void> {
-    while (playing && token === playToken) {
-      const more = await processNextFrame();
-      if (token !== playToken) return;
+  async function playLoop(myRunId: number): Promise<void> {
+    while (playing && isRunCurrent(runToken, myRunId)) {
+      const more = await processNextFrame(myRunId);
+      if (!isRunCurrent(runToken, myRunId)) return;
       if (!more) {
         playing = false;
         phase = 'finished';
@@ -369,6 +401,7 @@ export async function initApp(root: Document = document): Promise<void> {
       updateControls();
       const delay = currentSpeedDelayMs();
       await new Promise((resolve) => setTimeout(resolve, delay));
+      if (!isRunCurrent(runToken, myRunId)) return;
     }
   }
 
@@ -378,11 +411,11 @@ export async function initApp(root: Document = document): Promise<void> {
     playing = true;
     phase = 'tracking';
     updateControls();
-    void playLoop(playToken);
+    void playLoop(runToken.id);
   });
 
   el.btnPause.addEventListener('click', () => {
-    stopPlayback();
+    invalidateCurrentRun();
     phase = 'paused';
     setHint('Paused.');
     updateControls();
@@ -390,19 +423,22 @@ export async function initApp(root: Document = document): Promise<void> {
 
   el.btnStep.addEventListener('click', async () => {
     if (playing) return;
-    const more = await processNextFrame();
+    const myRunId = runToken.id;
+    const more = await processNextFrame(myRunId);
+    if (!isRunCurrent(runToken, myRunId)) return;
     phase = more ? 'paused' : 'finished';
     if (!more) setHint('Reached the end of the video.');
     updateControls();
   });
 
   el.btnReset.addEventListener('click', async () => {
-    stopPlayback();
+    const myRunId = invalidateCurrentRun();
     tracker = null;
     trajectory = [];
     metrics = new MetricsAggregator();
     renderMetrics();
-    await seekToFrame(0);
+    await seekToFrame(0, myRunId);
+    if (!isRunCurrent(runToken, myRunId)) return;
     if (selectionRect) {
       phase = 'ready';
       setHint('Target selected. Press Start to begin tracking, or drag again to change it.');

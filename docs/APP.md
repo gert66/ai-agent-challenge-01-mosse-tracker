@@ -86,10 +86,14 @@ per-run frame inspection happens in the app itself.
 ## Manual verification performed
 
 Built and served via `npm run build && npm run preview`, then driven with
-an ad-hoc Playwright script (not committed — see the worker report for
-this batch) that: loaded each of the three videos, clicked "Use suggested
-box", ran to completion at max speed, and also exercised manual
-drag-selection, Step, Pause, Reset, Re-select, and video switching. No
-console errors were observed in any run. Tracked-frame percentage was
-100% for all three videos with the suggested boxes (comfortably above the
->90% bar for `synthetic_easy`).
+the committed Playwright suite (`tests/e2e/`, see `docs/TESTING.md`) that:
+loads each of the three videos, clicks "Use suggested box", runs to
+completion at max speed, and also exercises manual drag-selection, Step,
+Pause, Reset, Re-select, and video switching (including mid-playback, to
+cover the run-token guard in `src/app/ui.ts`). No console errors are
+observed in any run. Tracked-frame percentage is ~97% for
+`synthetic_occlusion` — its suggested box was chosen (see
+`SUGGESTED_BOXES` below) so the camera motion genuinely occludes the
+target around frame 106–110, producing a real lost→recovered transition
+rather than tracking through it uneventfully — and 100% for
+`synthetic_easy` (comfortably above the >90% bar for `synthetic_easy`).
