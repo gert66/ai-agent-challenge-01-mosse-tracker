@@ -1,5 +1,16 @@
 # 1. MOSSE Object Tracker
 
+A browser app for selecting one object in the first frame of a video and
+tracking it automatically through the rest of the clip, using a from-scratch
+MOSSE correlation-filter tracker (no OpenCV, no ML). It shows a bounding
+box, trajectory, PSR confidence, and lost/recovered status live over the
+three supplied videos, plus a metrics panel (tracked-frame %, lost/recovery
+counts, mean/min PSR, processing fps).
+
+**Status:** feature-complete and demo-ready. See [FINAL_REPORT.md](FINAL_REPORT.md)
+for the acceptance-criteria mapping, measured per-video results, and test
+counts.
+
 ## Run it
 
 ```
@@ -34,6 +45,24 @@ test for a Reset/Re-select/video-switch race. It requires a Playwright
 browser to be installed once: `npx playwright install chromium`. See
 `docs/TESTING.md` for what each spec covers, why port 48173, and known
 limitations.
+
+## Project layout
+
+- `src/tracker/` — pure-TypeScript, DOM-independent MOSSE tracker core (`mosse.ts`, `fft.ts`).
+- `src/app/` — browser UI: state machine (`ui.ts`), video loading (`video.ts`), canvas overlay (`overlay.ts`), PSR timeline (`timeline.ts`), metrics (`metrics.ts`), run-token race guard (`runToken.ts`).
+- `tests/unit/` — Vitest unit tests for the tracker, FFT, metrics, timeline, and run-token guard.
+- `tests/e2e/` — Playwright end-to-end tests driving a real browser against the built app.
+- `scripts/` — `prepare-videos.mjs`, the one-time video transcoding script.
+- `public/videos/` — browser-playable H.264 MP4s and `manifest.json`, generated from the source videos in the repo root.
+- `docs/` — architecture and testing documentation (see below).
+
+## Documentation
+
+- [docs/ALGORITHM.md](docs/ALGORITHM.md) — the MOSSE tracker itself: preprocessing, filter training/update, PSR-based lost/recovered state machine.
+- [docs/APP.md](docs/APP.md) — browser app architecture, coordinate mapping, seek-and-sample tracking design.
+- [docs/TESTING.md](docs/TESTING.md) — unit vs. e2e test design, browser install, port rationale, known limitations.
+- [docs/TOOLING.md](docs/TOOLING.md) — video transcoding details, external-tool disclosure, agent permissions.
+- [FINAL_REPORT.md](FINAL_REPORT.md) — acceptance-criteria mapping, measured per-video results, autonomy/audit trail.
 
 ## What is the challenge?
 Select one object in the first frame of a video. The software must keep following that same object frame by frame and show where it moves.
