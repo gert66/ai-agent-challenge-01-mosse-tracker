@@ -33,26 +33,42 @@ export interface TrackingOverlayInput {
 
 /** Draws the bounding box, trajectory, event markers, confidence bar, and state badge for one frame. */
 export function drawTrackingOverlay({ ctx, result, trajectory, events, lastKnownRect }: TrackingOverlayInput): void {
+  const boxRect = result.state === 'lost' ? lastKnownRect : result.rect;
   drawTrajectory(ctx, trajectory);
   drawEventMarkers(ctx, events);
-  drawBoundingBox(ctx, result, lastKnownRect);
+  drawBoundingBox(ctx, result, boxRect);
   drawConfidenceBar(ctx, result);
-  drawStateBadge(ctx, result);
+  drawStateBadge(ctx, result, boxRect);
 }
 
 function drawTrajectory(ctx: CanvasRenderingContext2D, trajectory: readonly { x: number; y: number; state: TrackState }[]): void {
-  if (trajectory.length < 2) return;
-  ctx.save();
-  ctx.lineWidth = 2;
-  for (let i = 1; i < trajectory.length; i++) {
-    const prev = trajectory[i - 1];
-    const curr = trajectory[i];
-    ctx.strokeStyle = STATE_COLOR[curr.state];
-    ctx.beginPath();
-    ctx.moveTo(prev.x, prev.y);
-    ctx.lineTo(curr.x, curr.y);
-    ctx.stroke();
+  if (trajectory.length === 0) return;
+  if (trajectory.length >= 2) {
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.55;
+    for (let i = 1; i < trajectory.length; i++) {
+      const prev = trajectory[i - 1];
+      const curr = trajectory[i];
+      ctx.strokeStyle = STATE_COLOR[curr.state];
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(curr.x, curr.y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
+
+  // Dot marking the current position, drawn fully opaque on top of the trajectory.
+  const last = trajectory[trajectory.length - 1];
+  ctx.save();
+  ctx.fillStyle = STATE_COLOR[last.state];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -70,13 +86,30 @@ function drawEventMarkers(ctx: CanvasRenderingContext2D, events: readonly Trajec
   ctx.restore();
 }
 
-function drawBoundingBox(ctx: CanvasRenderingContext2D, result: TrackResult, lastKnownRect: Rect): void {
-  const rect = result.state === 'lost' ? lastKnownRect : result.rect;
+/** Traces a rounded-rectangle path (anti-aliased corners) into the current path without stroking/filling it. */
+function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.arcTo(x + w, y, x + w, y + radius, radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+  ctx.lineTo(x + radius, y + h);
+  ctx.arcTo(x, y + h, x, y + h - radius, radius);
+  ctx.lineTo(x, y + radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.closePath();
+}
+
+function drawBoundingBox(ctx: CanvasRenderingContext2D, result: TrackResult, rect: Rect): void {
   ctx.save();
   ctx.strokeStyle = STATE_COLOR[result.state];
   ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
   if (result.state === 'lost') ctx.setLineDash([8, 6]);
-  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 6);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -104,19 +137,23 @@ function drawConfidenceBar(ctx: CanvasRenderingContext2D, result: TrackResult): 
   ctx.restore();
 }
 
-function drawStateBadge(ctx: CanvasRenderingContext2D, result: TrackResult): void {
+/** Small state label anchored just above (or, if there's no room, below) the tracked box. */
+function drawStateBadge(ctx: CanvasRenderingContext2D, result: TrackResult, rect: Rect): void {
   const label = `${result.state.toUpperCase()} · frame ${result.frameIndex}`;
   ctx.save();
-  ctx.font = 'bold 13px system-ui, sans-serif';
-  const paddingX = 8;
+  ctx.font = 'bold 12px system-ui, sans-serif';
+  const paddingX = 7;
   const textWidth = ctx.measureText(label).width;
   const boxWidth = textWidth + paddingX * 2;
-  const boxHeight = 24;
-  const x = ctx.canvas.width - boxWidth - 10;
-  const y = 10;
+  const boxHeight = 20;
+  const margin = 6;
+  let x = rect.x;
+  let y = rect.y - boxHeight - margin;
+  if (y < 0) y = rect.y + rect.height + margin;
+  x = Math.max(2, Math.min(x, ctx.canvas.width - boxWidth - 2));
   ctx.fillStyle = STATE_COLOR[result.state];
   ctx.fillRect(x, y, boxWidth, boxHeight);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#0b1120';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x + paddingX, y + boxHeight / 2 + 1);
   ctx.restore();

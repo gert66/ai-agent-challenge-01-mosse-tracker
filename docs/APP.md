@@ -17,10 +17,60 @@ browser UI built on top of the pure-TypeScript tracker in `src/tracker/`
 - `src/app/overlay.ts` — canvas drawing routines for the selection
   rectangle, bounding box, trajectory, event markers, confidence bar, and
   state badge. Pure functions of `(ctx, data)`.
+- `src/app/timeline.ts` — the PSR-over-time chart. `frameToX`, `psrToY`,
+  and `psrChartMax` are pure layout-math functions (unit-tested in
+  `tests/unit/timeline.test.ts`); `drawPsrTimeline` is a thin canvas-drawing
+  wrapper around them, in the same `(ctx, data)` style as `overlay.ts`. It
+  is fed only by `MetricsAggregator.getResults()` (via
+  `computeLostSpans` in `metrics.ts` for the shaded lost spans) — no DOM
+  queries.
 - `src/app/ui.ts` — wires the DOM (`index.html` elements) to the tracker,
   video element, and the modules above; owns all mutable app state.
 - `src/main.ts` — entry point; calls `initApp()` and renders a fallback
   error message if startup fails (e.g. no manifest, no video codec support).
+
+## UI elements added in the polish pass
+
+- **Video description** (`data-testid="video-description"`) — the current
+  video's title and description from `manifest.json`, shown under the
+  toolbar.
+- **Frame progress** (`data-testid="frame-progress"`) — a `frame N / total`
+  readout plus a native `<progress>` bar, updated every processed frame
+  (`N` is 1-based, so it reads `frame total / total` once finished).
+- **PSR timeline** (`data-testid="psr-timeline"`) — a small canvas chart of
+  PSR per processed frame, with a dashed line at the tracker's
+  `psrLostThreshold` (from `DEFAULT_MOSSE_OPTIONS` in `src/tracker/mosse.ts`)
+  and shaded spans over contiguous lost runs. Redrawn once per processed
+  frame, same as the main overlay — no extra render loop.
+- **Legend** (`data-testid="legend"`) — explains the box/trajectory/marker
+  colours used both on the canvas overlay and in the CSS state badges. The
+  hex values are shared conceptually (not literally, since one is TS canvas
+  code and the other CSS) via the `--state-tracking` / `--state-recovered`
+  / `--state-lost` custom properties in `src/styles.css`, which match
+  `STATE_COLOR` in `src/app/overlay.ts` exactly.
+- **Loading / error states** — while a video is loading, a spinner overlay
+  covers the canvas and playback/selection controls are disabled
+  (`el.stageLoading`, toggled by `updateControls()`). If the browser
+  reports a media error instead of `loadeddata` (see the `waitForLoadedData`
+  rejection path in `src/app/video.ts`), a banner
+  (`data-testid="error-banner"`) replaces it with a message instead of
+  letting the failure surface as a console error; the app moves to a new
+  `'error'` `AppPhase` (`src/app/state.ts`) until a different video is
+  selected.
+
+## Keyboard shortcuts
+
+- **Space** — Start if ready/paused, Pause if tracking.
+- **ArrowRight** — Step one frame (same as the Step button; a no-op if
+  disabled).
+- **R** — Reset.
+
+Shortcuts are ignored while a `<select>`, `<input>`, or `<textarea>` has
+focus, so they don't fight with, e.g., the video/speed dropdowns. They work
+by calling `.click()` on the corresponding button element, so there is a
+single source of truth for what each action does — the button's own click
+handler — and disabled buttons naturally no-op. A one-line reminder of the
+shortcuts is shown in the Playback panel.
 
 ## Frame processing: seek-and-sample, not real-time playback
 

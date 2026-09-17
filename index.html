@@ -14,17 +14,48 @@
       </header>
 
       <main class="layout">
-        <section class="video-column">
+        <section class="stage-column">
           <div class="video-toolbar">
             <label for="video-select">Video</label>
             <select id="video-select" data-testid="video-select"></select>
           </div>
 
-          <div class="canvas-wrap">
-            <canvas id="canvas" data-testid="canvas"></canvas>
-            <video id="source-video" muted playsinline preload="auto" style="display: none"></video>
-            <p id="hint" class="hint"></p>
+          <div class="stage">
+            <div class="canvas-wrap">
+              <canvas id="canvas" data-testid="canvas"></canvas>
+              <video id="source-video" muted playsinline preload="auto" style="display: none"></video>
+
+              <div id="stage-loading" class="stage-loading" data-testid="stage-loading">
+                <span class="spinner" aria-hidden="true"></span>
+                <span>Loading video…</span>
+              </div>
+
+              <div id="error-banner" class="error-banner" data-testid="error-banner" hidden></div>
+            </div>
           </div>
+
+          <p id="hint" class="hint"></p>
+
+          <div class="progress-row">
+            <progress id="frame-progress-bar" class="frame-progress-bar" max="1" value="0"></progress>
+            <span id="frame-progress" class="frame-progress-text" data-testid="frame-progress">frame 0 / 0</span>
+          </div>
+
+          <div id="video-description" class="video-description" data-testid="video-description">
+            <h3 id="video-description-title"></h3>
+            <p id="video-description-text"></p>
+          </div>
+
+          <section class="panel timeline-panel">
+            <h2>Confidence (PSR) over time</h2>
+            <canvas
+              id="psr-timeline"
+              class="psr-timeline"
+              data-testid="psr-timeline"
+              width="640"
+              height="90"
+            ></canvas>
+          </section>
         </section>
 
         <aside class="control-column">
@@ -32,18 +63,18 @@
             <h2>Target selection</h2>
             <p class="panel-help">Drag a box around the object in the first frame.</p>
             <div class="button-row">
-              <button id="btn-suggest" data-testid="use-suggested-box">Use suggested box</button>
-              <button id="btn-reselect" data-testid="btn-reselect">Re-select</button>
+              <button id="btn-suggest" class="btn-secondary" data-testid="use-suggested-box">Use suggested box</button>
+              <button id="btn-reselect" class="btn-secondary" data-testid="btn-reselect">Re-select</button>
             </div>
           </section>
 
           <section class="panel">
             <h2>Playback</h2>
             <div class="button-row">
-              <button id="btn-start" data-testid="btn-start">Start</button>
-              <button id="btn-pause" data-testid="btn-pause">Pause</button>
-              <button id="btn-step" data-testid="btn-step">Step</button>
-              <button id="btn-reset" data-testid="btn-reset">Reset</button>
+              <button id="btn-start" class="btn-primary" data-testid="btn-start">Start</button>
+              <button id="btn-pause" class="btn-secondary" data-testid="btn-pause">Pause</button>
+              <button id="btn-step" class="btn-secondary" data-testid="btn-step">Step</button>
+              <button id="btn-reset" class="btn-secondary" data-testid="btn-reset">Reset</button>
             </div>
             <div class="speed-row">
               <label for="speed-select">Speed</label>
@@ -54,6 +85,7 @@
                 <option value="0">max</option>
               </select>
             </div>
+            <p class="shortcuts-hint">Shortcuts: <kbd>Space</kbd> start/pause · <kbd>&rarr;</kbd> step · <kbd>R</kbd> reset</p>
           </section>
 
           <section class="panel">
@@ -79,6 +111,18 @@
               <dt>Processing fps</dt>
               <dd data-testid="metric-fps">0.0</dd>
             </dl>
+          </section>
+
+          <section class="panel">
+            <h2>Legend</h2>
+            <ul class="legend" data-testid="legend">
+              <li><span class="swatch swatch-tracking"></span> Tracking — solid box, high confidence</li>
+              <li><span class="swatch swatch-recovered"></span> Recovered — target re-acquired after a loss</li>
+              <li><span class="swatch swatch-lost"></span> Lost — dashed box shows the last known position</li>
+              <li><span class="swatch swatch-trajectory"></span> Trajectory — colour follows state, dot marks the current position</li>
+              <li><span class="marker marker-lost"></span> Lost event</li>
+              <li><span class="marker marker-recovered"></span> Recovery event</li>
+            </ul>
           </section>
         </aside>
       </main>

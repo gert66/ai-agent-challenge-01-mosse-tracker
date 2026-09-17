@@ -12,15 +12,29 @@ export function videoUrl(baseUrl: string, file: string): string {
   return `${baseUrl}${file}`;
 }
 
-/** Resolves once the video has decoded enough data to read frame 0 (readyState >= HAVE_CURRENT_DATA). */
+/**
+ * Resolves once the video has decoded enough data to read frame 0
+ * (readyState >= HAVE_CURRENT_DATA), or rejects if the browser reports a
+ * media error (bad URL, unsupported codec, network failure) instead.
+ */
 export function waitForLoadedData(video: HTMLVideoElement): Promise<void> {
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
-  return new Promise((resolve) => {
-    const handler = () => {
-      video.removeEventListener('loadeddata', handler);
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('error', onError);
+    };
+    const onLoaded = () => {
+      cleanup();
       resolve();
     };
-    video.addEventListener('loadeddata', handler);
+    const onError = () => {
+      cleanup();
+      const code = video.error?.code;
+      reject(new Error(code ? `media error code ${code}` : 'failed to load video'));
+    };
+    video.addEventListener('loadeddata', onLoaded);
+    video.addEventListener('error', onError);
   });
 }
 

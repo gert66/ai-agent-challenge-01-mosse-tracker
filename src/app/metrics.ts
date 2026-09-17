@@ -62,6 +62,29 @@ export function processingFps(frameDurationsMs: readonly number[]): number {
   return meanMs > 0 ? 1000 / meanMs : 0;
 }
 
+export interface LostSpan {
+  startFrameIndex: number;
+  endFrameIndex: number;
+}
+
+/** Contiguous runs of `state === 'lost'` frames, for shading a confidence timeline. */
+export function computeLostSpans(results: readonly Pick<TrackResult, 'state' | 'frameIndex'>[]): LostSpan[] {
+  const spans: LostSpan[] = [];
+  let start: number | null = null;
+  let last = -1;
+  for (const r of results) {
+    if (r.state === 'lost') {
+      if (start === null) start = r.frameIndex;
+      last = r.frameIndex;
+    } else if (start !== null) {
+      spans.push({ startFrameIndex: start, endFrameIndex: last });
+      start = null;
+    }
+  }
+  if (start !== null) spans.push({ startFrameIndex: start, endFrameIndex: last });
+  return spans;
+}
+
 /** Marks the frame where each lost/recovered transition happened, for overlay annotation. */
 export function extractTrajectoryEvents(results: readonly TrackResult[]): TrajectoryEvent[] {
   const events: TrajectoryEvent[] = [];

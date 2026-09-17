@@ -16,7 +16,10 @@ Covers, without touching the DOM or a browser:
 - `src/tracker/fft.ts` — the FFT implementation (`tests/unit/fft.test.ts`).
 - `src/tracker/mosse.ts` — the MOSSE filter itself (`tests/unit/mosse.test.ts`).
 - `src/app/metrics.ts` — tracked-frame %, lost/recovery counting, PSR
-  aggregation (`tests/unit/metrics.test.ts`).
+  aggregation, and lost-span detection for the timeline chart
+  (`tests/unit/metrics.test.ts`).
+- `src/app/timeline.ts` — the PSR-timeline chart's pure layout math
+  (`frameToX`, `psrToY`, `psrChartMax`) (`tests/unit/timeline.test.ts`).
 - `src/app/runToken.ts` — the generation-counter guard that protects the
   tracking loop from the Reset/Re-select/video-switch race described below
   (`tests/unit/runToken.test.ts`).
@@ -55,6 +58,12 @@ on `http://localhost:48173` (see "Why port 48173, not Vite's default
   immediately fires Reset, Re-select, and a video switch back-to-back, and
   asserts no error was thrown and the app lands back in the selection
   state.
+- `ui-polish.spec.ts` — the UI-polish elements added on top of the main
+  flow: asserts `video-description`, `frame-progress`, `psr-timeline`, and
+  `legend` are visible after selecting a video, that the Space shortcut
+  starts tracking, and that after running `synthetic_easy` to completion
+  the `frame-progress` readout reads exactly `frame ${frameCount} /
+  ${frameCount}` per the manifest.
 
 Every spec installs a `page.on('console', ...)` / `page.on('pageerror',
 ...)` listener at the start and asserts it captured zero errors — this is

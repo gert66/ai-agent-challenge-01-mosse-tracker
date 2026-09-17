@@ -19,7 +19,8 @@ export interface VideoManifest {
 }
 
 export type AppPhase =
-  | 'loading' // fetching manifest
+  | 'loading' // fetching manifest, or a video is being fetched/decoded
+  | 'error' // the current video failed to load
   | 'select' // video loaded, first frame shown, waiting for a selection
   | 'ready' // a target rect is selected, tracking not yet started
   | 'tracking' // actively stepping through frames

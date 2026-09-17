@@ -61,6 +61,12 @@ container. All three outputs are confirmed `codec_name: h264`, `pix_fmt:
 yuv420p`, with resolution, frame rate, frame count and duration matching
 their sources exactly.
 
+## External generation tools
+
+No external app-generation tool (e.g. Lovable) was used for the UI/UX
+polish pass or anywhere else in this project. All markup, CSS, and
+TypeScript were written directly in this repository.
+
 ## Agent permissions
 
 A git-ignored `.claude/settings.local.json` allowlists repo-local `npm`,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeLostSpans,
   countLostEvents,
   countRecoveries,
   extractTrajectoryEvents,
@@ -106,6 +107,46 @@ describe('extractTrajectoryEvents', () => {
       { frameIndex: 2, type: 'lost', center: { x: 2, y: 2 } },
       { frameIndex: 4, type: 'recovered', center: { x: 4, y: 4 } },
     ]);
+  });
+});
+
+describe('computeLostSpans', () => {
+  it('returns no spans when never lost', () => {
+    const results = [makeResult(1, 'tracking', 20), makeResult(2, 'tracking', 18)];
+    expect(computeLostSpans(results)).toEqual([]);
+  });
+
+  it('collapses a contiguous lost run into a single span', () => {
+    const results = [
+      makeResult(1, 'tracking', 20),
+      makeResult(2, 'lost', 2),
+      makeResult(3, 'lost', 2),
+      makeResult(4, 'lost', 2),
+      makeResult(5, 'recovered', 15),
+    ];
+    expect(computeLostSpans(results)).toEqual([{ startFrameIndex: 2, endFrameIndex: 4 }]);
+  });
+
+  it('emits one span per separate lost run', () => {
+    const results = [
+      makeResult(1, 'lost', 2),
+      makeResult(2, 'tracking', 20),
+      makeResult(3, 'lost', 2),
+      makeResult(4, 'lost', 2),
+    ];
+    expect(computeLostSpans(results)).toEqual([
+      { startFrameIndex: 1, endFrameIndex: 1 },
+      { startFrameIndex: 3, endFrameIndex: 4 },
+    ]);
+  });
+
+  it('closes a span still open at the end of the series', () => {
+    const results = [makeResult(1, 'tracking', 20), makeResult(2, 'lost', 2), makeResult(3, 'lost', 2)];
+    expect(computeLostSpans(results)).toEqual([{ startFrameIndex: 2, endFrameIndex: 3 }]);
+  });
+
+  it('returns no spans for an empty series', () => {
+    expect(computeLostSpans([])).toEqual([]);
   });
 });
 

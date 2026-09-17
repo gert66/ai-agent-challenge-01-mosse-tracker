@@ -1,8 +1,9 @@
-import { MosseTracker, toGray, type Rect, type TrackResult, type TrackState } from '../tracker/mosse';
+import { DEFAULT_MOSSE_OPTIONS, MosseTracker, toGray, type Rect, type TrackResult, type TrackState } from '../tracker/mosse';
 import { MetricsAggregator, extractTrajectoryEvents } from './metrics';
 import { drawSelectionRect, drawTrackingOverlay } from './overlay';
 import { bumpRunToken, createRunToken, isRunCurrent } from './runToken';
 import { MIN_SELECTION_SIZE, SUGGESTED_BOXES, type AppPhase, type VideoManifestEntry } from './state';
+import { drawPsrTimeline } from './timeline';
 import { loadManifest, seekTo, videoUrl, waitForLoadedData } from './video';
 
 interface TrajectoryPoint {
@@ -16,6 +17,13 @@ interface Elements {
   canvas: HTMLCanvasElement;
   video: HTMLVideoElement;
   hint: HTMLParagraphElement;
+  stageLoading: HTMLElement;
+  errorBanner: HTMLElement;
+  frameProgressText: HTMLElement;
+  frameProgressBar: HTMLProgressElement;
+  videoDescriptionTitle: HTMLElement;
+  videoDescriptionText: HTMLElement;
+  psrCanvas: HTMLCanvasElement;
   btnSuggest: HTMLButtonElement;
   btnReselect: HTMLButtonElement;
   btnStart: HTMLButtonElement;
@@ -49,6 +57,13 @@ function queryElements(root: ParentNode): Elements {
     canvas: byId('canvas'),
     video: byId('source-video'),
     hint: byId('hint'),
+    stageLoading: byId('stage-loading'),
+    errorBanner: byId('error-banner'),
+    frameProgressText: byId('frame-progress'),
+    frameProgressBar: byId('frame-progress-bar'),
+    videoDescriptionTitle: byId('video-description-title'),
+    videoDescriptionText: byId('video-description-text'),
+    psrCanvas: byId('psr-timeline'),
     btnSuggest: byId('btn-suggest'),
     btnReselect: byId('btn-reselect'),
     btnStart: byId('btn-start'),
@@ -80,6 +95,9 @@ export async function initApp(root: Document = document): Promise<void> {
   const ctx2d = el.canvas.getContext('2d');
   if (!ctx2d) throw new Error('2D canvas context unavailable');
   const ctx: CanvasRenderingContext2D = ctx2d;
+  const psrCtx2d = el.psrCanvas.getContext('2d');
+  if (!psrCtx2d) throw new Error('2D canvas context unavailable');
+  const psrCtx: CanvasRenderingContext2D = psrCtx2d;
 
   const baseUrl = import.meta.env.BASE_URL;
   const manifest = await loadManifest(baseUrl);
@@ -132,9 +150,60 @@ export async function initApp(root: Document = document): Promise<void> {
     el.hint.textContent = text;
   }
 
+  function hintForPhase(p: AppPhase): string {
+    switch (p) {
+      case 'loading':
+        return 'Loading video…';
+      case 'error':
+        return 'This video failed to load — pick another one from the dropdown.';
+      case 'select':
+        return 'Drag a box around the object in the first frame, or click "Use suggested box".';
+      case 'ready':
+        return 'Target selected. Press Start (or Space) to begin tracking, or drag again to change it.';
+      case 'tracking':
+        return 'Tracking… press Space to pause.';
+      case 'paused':
+        return 'Paused. Press Space to resume, → to step, or R to reset.';
+      case 'finished':
+        return 'Reached the end of the video. Press R to reset.';
+    }
+  }
+
   function setBadge(text: string, cssClass: string): void {
     el.stateBadge.textContent = text;
     el.stateBadge.className = `state-badge ${cssClass}`;
+  }
+
+  function showError(message: string): void {
+    el.errorBanner.textContent = message;
+    el.errorBanner.hidden = false;
+  }
+
+  function hideError(): void {
+    el.errorBanner.hidden = true;
+  }
+
+  function renderVideoDescription(entry: VideoManifestEntry): void {
+    el.videoDescriptionTitle.textContent = entry.title;
+    el.videoDescriptionText.textContent = entry.description;
+  }
+
+  function renderFrameProgress(): void {
+    const total = effectiveFrameCount(currentEntry);
+    const current = Math.min(frameIndex + 1, total);
+    el.frameProgressText.textContent = `frame ${current} / ${total}`;
+    el.frameProgressBar.max = total;
+    el.frameProgressBar.value = current;
+  }
+
+  function renderPsrTimeline(): void {
+    drawPsrTimeline({
+      ctx: psrCtx,
+      results: metrics.getResults(),
+      totalFrames: effectiveFrameCount(currentEntry),
+      lostThreshold: DEFAULT_MOSSE_OPTIONS.psrLostThreshold,
+      goodThreshold: DEFAULT_MOSSE_OPTIONS.psrGoodThreshold,
+    });
   }
 
   function renderMetrics(): void {
@@ -153,13 +222,19 @@ export async function initApp(root: Document = document): Promise<void> {
     el.btnStart.disabled = !(phase === 'ready' || phase === 'paused');
     el.btnPause.disabled = phase !== 'tracking';
     el.btnStep.disabled = !((phase === 'ready' || phase === 'paused') && hasSelection);
-    el.btnReset.disabled = phase === 'select' || phase === 'loading';
-    el.btnSuggest.disabled = phase === 'loading' || phase === 'tracking';
-    el.btnReselect.disabled = phase === 'loading' || phase === 'tracking';
+    el.btnReset.disabled = phase === 'select' || phase === 'loading' || phase === 'error';
+    el.btnSuggest.disabled = phase === 'loading' || phase === 'tracking' || phase === 'error';
+    el.btnReselect.disabled = phase === 'loading' || phase === 'tracking' || phase === 'error';
+    el.videoSelect.disabled = phase === 'loading';
+    el.speedSelect.disabled = phase === 'loading' || phase === 'error';
+    el.stageLoading.hidden = phase !== 'loading';
 
     switch (phase) {
       case 'loading':
         setBadge('LOADING', 'state-badge-idle');
+        break;
+      case 'error':
+        setBadge('ERROR', 'state-badge-lost');
         break;
       case 'select':
         setBadge('SELECT TARGET', 'state-badge-idle');
@@ -212,6 +287,7 @@ export async function initApp(root: Document = document): Promise<void> {
   async function loadVideo(entry: VideoManifestEntry): Promise<void> {
     const myRunId = invalidateCurrentRun();
     phase = 'loading';
+    hideError();
     updateControls();
 
     currentEntry = entry;
@@ -222,20 +298,32 @@ export async function initApp(root: Document = document): Promise<void> {
     trajectory = [];
     metrics = new MetricsAggregator();
     renderMetrics();
+    renderVideoDescription(entry);
 
     el.canvas.width = entry.width;
     el.canvas.height = entry.height;
 
-    el.video.src = videoUrl(baseUrl, entry.file);
-    el.video.load();
-    await waitForLoadedData(el.video);
-    if (!isRunCurrent(runToken, myRunId)) return;
-    await seekToFrame(0, myRunId);
-    if (!isRunCurrent(runToken, myRunId)) return;
+    try {
+      el.video.src = videoUrl(baseUrl, entry.file);
+      el.video.load();
+      await waitForLoadedData(el.video);
+      if (!isRunCurrent(runToken, myRunId)) return;
+      await seekToFrame(0, myRunId);
+      if (!isRunCurrent(runToken, myRunId)) return;
+    } catch (err) {
+      if (!isRunCurrent(runToken, myRunId)) return;
+      phase = 'error';
+      showError(`Could not load "${entry.title}": ${err instanceof Error ? err.message : String(err)}`);
+      setHint(hintForPhase(phase));
+      updateControls();
+      return;
+    }
 
     phase = 'select';
-    setHint('Drag a box around the object in the first frame, or click "Use suggested box".');
+    setHint(hintForPhase(phase));
     drawSelectionState();
+    renderFrameProgress();
+    renderPsrTimeline();
     updateControls();
   }
 
@@ -243,7 +331,7 @@ export async function initApp(root: Document = document): Promise<void> {
     selectionRect = clampRect(rect, currentEntry.width, currentEntry.height);
     dragRect = null;
     phase = 'ready';
-    setHint('Target selected. Press Start to begin tracking, or drag again to change it.');
+    setHint(hintForPhase(phase));
     drawSelectionState();
     updateControls();
   }
@@ -313,8 +401,10 @@ export async function initApp(root: Document = document): Promise<void> {
     await seekToFrame(0, myRunId);
     if (!isRunCurrent(runToken, myRunId)) return;
     phase = 'select';
-    setHint('Drag a box around the object in the first frame, or click "Use suggested box".');
+    setHint(hintForPhase(phase));
     drawSelectionState();
+    renderFrameProgress();
+    renderPsrTimeline();
     updateControls();
   });
 
@@ -366,6 +456,8 @@ export async function initApp(root: Document = document): Promise<void> {
       lastKnownRect,
     });
     renderMetrics();
+    renderFrameProgress();
+    renderPsrTimeline();
     renderTrackingState(result);
 
     return frameIndex < effectiveFrameCount(currentEntry) - 1;
@@ -393,11 +485,12 @@ export async function initApp(root: Document = document): Promise<void> {
       if (!more) {
         playing = false;
         phase = 'finished';
-        setHint('Reached the end of the video.');
+        setHint(hintForPhase(phase));
         updateControls();
         return;
       }
       phase = 'tracking';
+      setHint(hintForPhase(phase));
       updateControls();
       const delay = currentSpeedDelayMs();
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -410,6 +503,7 @@ export async function initApp(root: Document = document): Promise<void> {
     if (playing) return;
     playing = true;
     phase = 'tracking';
+    setHint(hintForPhase(phase));
     updateControls();
     void playLoop(runToken.id);
   });
@@ -417,7 +511,7 @@ export async function initApp(root: Document = document): Promise<void> {
   el.btnPause.addEventListener('click', () => {
     invalidateCurrentRun();
     phase = 'paused';
-    setHint('Paused.');
+    setHint(hintForPhase(phase));
     updateControls();
   });
 
@@ -427,7 +521,7 @@ export async function initApp(root: Document = document): Promise<void> {
     const more = await processNextFrame(myRunId);
     if (!isRunCurrent(runToken, myRunId)) return;
     phase = more ? 'paused' : 'finished';
-    if (!more) setHint('Reached the end of the video.');
+    setHint(hintForPhase(phase));
     updateControls();
   });
 
@@ -439,20 +533,31 @@ export async function initApp(root: Document = document): Promise<void> {
     renderMetrics();
     await seekToFrame(0, myRunId);
     if (!isRunCurrent(runToken, myRunId)) return;
-    if (selectionRect) {
-      phase = 'ready';
-      setHint('Target selected. Press Start to begin tracking, or drag again to change it.');
-    } else {
-      phase = 'select';
-      setHint('Drag a box around the object in the first frame, or click "Use suggested box".');
-    }
+    phase = selectionRect ? 'ready' : 'select';
+    setHint(hintForPhase(phase));
     drawSelectionState();
+    renderFrameProgress();
+    renderPsrTimeline();
     updateControls();
   });
 
   el.videoSelect.addEventListener('change', () => {
     const entry = manifest.videos.find((v) => v.id === el.videoSelect.value);
     if (entry) void loadVideo(entry);
+  });
+
+  window.addEventListener('keydown', (evt) => {
+    const tag = (evt.target as HTMLElement | null)?.tagName;
+    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (evt.code === 'Space') {
+      evt.preventDefault();
+      (phase === 'tracking' ? el.btnPause : el.btnStart).click();
+    } else if (evt.code === 'ArrowRight') {
+      evt.preventDefault();
+      el.btnStep.click();
+    } else if (evt.key === 'r' || evt.key === 'R') {
+      el.btnReset.click();
+    }
   });
 
   el.videoSelect.value = currentEntry.id;
